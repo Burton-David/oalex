@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import time
 from pathlib import Path
+
+import pytest
 
 from oalex._cache import DiskCache
 
@@ -27,8 +31,6 @@ def test_expired_entry_returns_none(tmp_path: Path) -> None:
     # Backdate the file's mtime so it appears older than the TTL.
     path = next(tmp_path.glob("*.bin"))
     old = time.time() - 10
-    import os
-
     os.utime(path, (old, old))
 
     assert cache.get("temp") is None
@@ -56,3 +58,26 @@ def test_creates_directory_if_missing(tmp_path: Path) -> None:
     cache.set("k", b"v")
     assert nested.exists()
     assert cache.get("k") == b"v"
+
+
+def test_set_leaves_no_temp_files_behind(tmp_path: Path) -> None:
+    cache = DiskCache(tmp_path, ttl_seconds=60)
+    cache.set("k", b"v")
+    cache.set("k", b"v2")
+    assert [p.suffix for p in tmp_path.iterdir()] == [".bin"]
+
+
+def test_write_failure_logs_instead_of_raising(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A full disk shouldn't turn a successful fetch into an exception."""
+    cache = DiskCache(tmp_path, ttl_seconds=60)
+
+    def disk_full(*args: object, **kwargs: object) -> tuple[int, str]:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr("oalex._cache.tempfile.mkstemp", disk_full)
+    with caplog.at_level(logging.WARNING, logger="oalex._cache"):
+        cache.set("k", b"v")
+    assert cache.get("k") is None
+    assert "No space left" in caplog.text

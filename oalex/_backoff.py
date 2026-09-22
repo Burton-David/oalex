@@ -3,9 +3,9 @@
 OpenAlex returns 429 (rate-limited) and 5xx (server busy) under load.
 Most of these failures are transient; the upstream's Retry-After header
 tells us when the burst has cleared. ``with_backoff`` runs the request,
-retries on retryable statuses (429 + 5xx) and network errors with a
-1s/2s/4s schedule (three retries, total wait capped at ~7s), and honors
-Retry-After when the server suggests a longer wait.
+retries on retryable statuses (429 + 5xx) and transport errors with a
+1s/2s/4s schedule (three retries, ~7s of waiting in the worst case), and
+honors Retry-After when the server suggests a longer wait.
 """
 
 from __future__ import annotations
@@ -20,14 +20,15 @@ _log = logging.getLogger(__name__)
 
 _RETRYABLE_STATUS: frozenset[int] = frozenset({429, 500, 502, 503, 504})
 
-# 1s, 2s, 4s — three retries plus the initial attempt gives four tries
+# 1s, 2s, 4s: three retries plus the initial attempt gives four tries
 # and a worst-case ~7s wait. Higher caps don't help in practice: when an
 # upstream's 429 cooldown is on the order of minutes, retrying longer
 # just delays the user without succeeding.
 _DEFAULT_DELAYS: tuple[float, ...] = (1.0, 2.0, 4.0)
 
-# Retry-After can suggest very long waits; cap so a misbehaving upstream
-# can't pin a single request for minutes.
+# Retry-After above this means the wait isn't a burst cooldown. On a 429
+# it's almost always the daily credit budget, which resets at midnight UTC,
+# so we hand the response back instead of sleeping on it.
 _MAX_RETRY_AFTER_SECONDS = 30.0
 
 
@@ -38,56 +39,53 @@ async def with_backoff(
 ) -> httpx.Response:
     """Run ``do_request()`` with exponential backoff on retryable failures.
 
-    Returns the final :class:`httpx.Response` (which the caller should
-    pass through :meth:`raise_for_status` for a clean error if non-2xx).
-    On a network-level failure (``httpx.HTTPError`` raised before a
-    response arrives) all attempts are exhausted before the exception
-    propagates.
+    Returns the final :class:`httpx.Response`, which may still be a 429 or
+    5xx once retries run out; the caller decides how to surface it. A
+    transport error (connection refused, timeout) is retried the same way
+    and re-raised after the last attempt.
 
     ``delays`` is the sequence of inter-attempt sleeps; total attempts =
     ``len(delays) + 1``.
     """
-    last_network_error: httpx.HTTPError | None = None
-    last_response: httpx.Response | None = None
-    for attempt in range(len(delays) + 1):
-        if attempt > 0:
-            sleep_for = delays[attempt - 1]
-            if last_response is not None:
-                hint = _parse_retry_after(
-                    last_response.headers.get("retry-after")
-                )
-                if hint is not None:
-                    sleep_for = max(sleep_for, min(hint, _MAX_RETRY_AFTER_SECONDS))
-            _log.info(
-                "oalex: backing off %.1fs before retry %d/%d",
-                sleep_for, attempt, len(delays),
-            )
-            await asyncio.sleep(sleep_for)
+    last_attempt = len(delays)
+    for attempt in range(last_attempt + 1):
         try:
             response = await do_request()
-        except httpx.HTTPError as exc:
-            last_network_error = exc
-            last_response = None
-            if attempt == len(delays):
+        except httpx.TransportError as exc:
+            if attempt == last_attempt:
                 raise
             _log.warning(
                 "oalex: network error on attempt %d/%d (%s); retrying",
-                attempt + 1, len(delays) + 1, exc,
+                attempt + 1, last_attempt + 1, exc,
             )
-            continue
-        if response.status_code not in _RETRYABLE_STATUS:
-            return response
-        last_response = response
-        if attempt == len(delays):
-            return response
-        _log.warning(
-            "oalex: HTTP %d on attempt %d/%d; retrying",
-            response.status_code, attempt + 1, len(delays) + 1,
-        )
-    if last_response is not None:
-        return last_response
-    assert last_network_error is not None
-    raise last_network_error
+            sleep_for = delays[attempt]
+        else:
+            if response.status_code not in _RETRYABLE_STATUS or attempt == last_attempt:
+                return response
+            if _budget_exhausted(response):
+                return response
+            sleep_for = delays[attempt]
+            hint = _parse_retry_after(response.headers.get("retry-after"))
+            if hint is not None:
+                if hint > _MAX_RETRY_AFTER_SECONDS:
+                    return response
+                sleep_for = max(sleep_for, hint)
+            _log.warning(
+                "oalex: HTTP %d on attempt %d/%d; retrying",
+                response.status_code, attempt + 1, last_attempt + 1,
+            )
+        _log.info("oalex: backing off %.1fs", sleep_for)
+        await asyncio.sleep(sleep_for)
+    raise AssertionError("unreachable: the final attempt returns or raises")
+
+
+def _budget_exhausted(response: httpx.Response) -> bool:
+    # A 429 also fires for bursts over 100 req/s while credits remain; only
+    # a zero balance means waiting seconds is pointless.
+    return (
+        response.status_code == 429
+        and response.headers.get("x-ratelimit-remaining", "").strip() == "0"
+    )
 
 
 def _parse_retry_after(value: str | None) -> float | None:

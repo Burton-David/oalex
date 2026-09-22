@@ -125,7 +125,63 @@ async def test_honors_retry_after_header(monkeypatch: pytest.MonkeyPatch) -> Non
     assert sleeps[0] == 2.0
 
 
-async def test_retry_after_capped(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_long_retry_after_returns_429_without_sleeping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Retry-After past 30s means the daily budget is gone; sleeping won't help."""
+    sleeps: list[float] = []
+
+    async def record_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr("oalex._backoff.asyncio.sleep", record_sleep)
+    calls = 0
+
+    async def do_request() -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(429, headers={"retry-after": "9999"}, content=b"")
+
+    response = await with_backoff(do_request, delays=(0.5, 1.0))
+    assert response.status_code == 429
+    assert calls == 1
+    assert sleeps == []
+
+
+async def test_zero_remaining_budget_returns_429_without_sleeping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """X-RateLimit-Remaining is the credits left today (OpenAlex auth docs)."""
+    sleeps: list[float] = []
+
+    async def record_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr("oalex._backoff.asyncio.sleep", record_sleep)
+
+    async def do_request() -> httpx.Response:
+        return httpx.Response(429, headers={"x-ratelimit-remaining": "0"}, content=b"")
+
+    response = await with_backoff(do_request)
+    assert response.status_code == 429
+    assert sleeps == []
+
+
+async def test_burst_429_with_credits_left_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("oalex._backoff.asyncio.sleep", _no_sleep)
+    statuses = iter([
+        httpx.Response(429, headers={"x-ratelimit-remaining": "812"}, content=b""),
+        httpx.Response(200, content=b"{}"),
+    ])
+
+    async def do_request() -> httpx.Response:
+        return next(statuses)
+
+    response = await with_backoff(do_request)
+    assert response.status_code == 200
+
+
+async def test_retry_after_at_cap_is_honored(monkeypatch: pytest.MonkeyPatch) -> None:
     sleeps: list[float] = []
 
     async def record_sleep(seconds: float) -> None:
@@ -133,7 +189,7 @@ async def test_retry_after_capped(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("oalex._backoff.asyncio.sleep", record_sleep)
     statuses = iter([
-        httpx.Response(429, headers={"retry-after": "9999"}, content=b""),
+        httpx.Response(503, headers={"retry-after": "30"}, content=b""),
         httpx.Response(200, content=b"{}"),
     ])
 
@@ -141,8 +197,24 @@ async def test_retry_after_capped(monkeypatch: pytest.MonkeyPatch) -> None:
         return next(statuses)
 
     await with_backoff(do_request, delays=(0.5,))
-    # Retry-After of 9999s should be capped at 30s (our hard ceiling)
-    assert sleeps[0] == 30.0
+    assert sleeps == [30.0]
+
+
+async def test_non_transport_http_error_is_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A redirect loop fails the same way every time; only transport errors retry."""
+    monkeypatch.setattr("oalex._backoff.asyncio.sleep", _no_sleep)
+    calls = 0
+
+    async def do_request() -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        raise httpx.TooManyRedirects("loop")
+
+    with pytest.raises(httpx.TooManyRedirects):
+        await with_backoff(do_request)
+    assert calls == 1
 
 
 def test_parse_retry_after_handles_seconds() -> None:
