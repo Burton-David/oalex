@@ -20,7 +20,7 @@ from typing import Any
 class Author:
     """An author on an OpenAlex Work.
 
-    ``orcid`` is the full ORCID URL when OpenAlex has one — many records
+    ``orcid`` is the full ORCID URL when OpenAlex has one. Many records
     don't, in which case it's ``None``.
     """
 
@@ -36,8 +36,8 @@ class Work:
     that OpenAlex returns. Use ``.url`` for the canonical URL form.
 
     ``raw`` holds the full deserialized JSON payload for fields not
-    surfaced as typed attributes (institutions, concepts, host_venue,
-    abstract_inverted_index, etc.).
+    surfaced as typed attributes (topics, keywords, locations,
+    counts_by_year, etc.).
     """
 
     id: str
@@ -58,7 +58,7 @@ class Work:
     """Bare OpenAlex IDs of works OpenAlex considers similar. Computed
     from topic-vector overlap, not a citation relationship."""
     field_name: str | None = None
-    """``primary_topic.field.display_name`` when present — coarse
+    """``primary_topic.field.display_name`` when present: a coarse
     discipline label ("Computer Science", "Medicine", "Mathematics")."""
     raw: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
 
@@ -67,7 +67,7 @@ def parse_work(raw: Mapping[str, Any] | None) -> Work | None:
     """Parse an OpenAlex Work JSON payload into a :class:`Work`.
 
     Returns ``None`` when the payload is empty or lacks a parseable
-    ``id`` — OpenAlex sometimes returns placeholder records (merged
+    ``id``. OpenAlex sometimes returns placeholder records (merged
     duplicates, withdrawn entries) that we don't want to surface to
     callers.
     """

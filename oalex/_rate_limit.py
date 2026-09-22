@@ -1,11 +1,12 @@
-"""Async rate limiter — at most one call per ``min_interval`` seconds, in order.
+"""Async rate limiter: at most one call per ``min_interval`` seconds, in order.
 
-OpenAlex's polite pool tolerates ~10 req/sec without complaint, so a
-fixed-interval limiter is the right fit (the upstream's documented rate
-is what they actually enforce). Process-local; clients in separate
-processes maintain their own limiters and can collectively exceed the
-documented rate. That's acceptable for a single-process client library;
-distributed deployments should layer their own coordination.
+OpenAlex rejects bursts above 100 requests/second with a 429. The
+client's default of one request per 0.1s stays an order of magnitude
+under that, which leaves room for several processes sharing one IP.
+Process-local; clients in separate processes keep their own limiters
+and can collectively exceed the rate. That's acceptable for a
+single-process client library; distributed deployments should layer
+their own coordination.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ class RateLimiter:
 
     ``acquire()`` returns immediately if at least ``min_interval`` seconds
     have passed since the last release; otherwise sleeps until that's
-    true. Re-entrant from multiple coroutines via an internal lock.
+    true. Safe to call from many coroutines on one loop via an internal lock.
     """
 
     def __init__(self, min_interval_seconds: float) -> None:

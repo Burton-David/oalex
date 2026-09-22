@@ -55,8 +55,6 @@ _VASWANI_WORK: dict = {
 }
 
 
-# ---- URL strippers ----
-
 
 def test_strip_openalex_id_url_extracts_w_id() -> None:
     assert _strip_openalex_id_url("https://openalex.org/W2626778328") == "W2626778328"
@@ -83,8 +81,6 @@ def test_strip_doi_url_returns_none_for_empty() -> None:
     assert _strip_doi_url("") is None
 
 
-# ---- abstract reconstruction ----
-
 
 def test_reconstruct_abstract_orders_words_by_position() -> None:
     inverted = {"The": [0, 4], "quick": [1], "brown": [2], "fox": [3], "rest": [5]}
@@ -104,8 +100,6 @@ def test_reconstruct_abstract_skips_non_int_positions() -> None:
     inverted = {"hello": [0], "broken": ["not-an-int", None]}
     assert _reconstruct_abstract(inverted) == "hello"
 
-
-# ---- parse_work ----
 
 
 def test_parse_work_extracts_canonical_fields() -> None:
@@ -286,7 +280,7 @@ def test_parse_work_raw_payload_is_read_only() -> None:
 
 
 def test_work_is_frozen() -> None:
-    """Work is immutable — frozen dataclass."""
+    """Work is a frozen dataclass; callers can't mutate a shared record."""
     w = parse_work(_VASWANI_WORK)
     assert w is not None
     with pytest.raises(AttributeError):
