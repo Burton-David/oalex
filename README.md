@@ -1,6 +1,7 @@
 # oalex
 
 [![CI](https://github.com/Burton-David/oalex/actions/workflows/ci.yml/badge.svg)](https://github.com/Burton-David/oalex/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/oalex)](https://pypi.org/project/oalex/)
 [![Python 3.10–3.14](https://img.shields.io/badge/python-3.10%20to%203.14-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -40,10 +41,8 @@ The OpenAlex HTTP API is clean, but every new client ends up re-solving the same
 
 ## Install
 
-Not on PyPI yet. Install from GitHub:
-
 ```bash
-pip install git+https://github.com/Burton-David/oalex
+pip install oalex
 ```
 
 Python 3.10+. The only runtime dependency is [httpx](https://www.python-httpx.org/).
