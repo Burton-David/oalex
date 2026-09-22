@@ -1,5 +1,9 @@
 # oalex
 
+[![CI](https://github.com/Burton-David/oalex/actions/workflows/ci.yml/badge.svg)](https://github.com/Burton-David/oalex/actions/workflows/ci.yml)
+[![Python 3.10–3.12](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Async Python client for the [OpenAlex](https://openalex.org/) scholarly works API. Typed, rate-limited, disk-cached, polite-pool-first.
 
 ```python
