@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-09-22)
 
 OpenAlex retired the mailto polite pool in February 2026 and now meters a daily credit budget. This release catches the client up.
 
