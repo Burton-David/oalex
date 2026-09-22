@@ -1,0 +1,40 @@
+name: publish
+
+# Trusted Publishing (OIDC): PyPI trusts this workflow file in the pypi
+# environment, so no token is stored anywhere. workflow_dispatch exists for
+# publishing a tag whose GitHub release was cut before this workflow did.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to publish, e.g. v0.2.0
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: check tag matches package version
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' oalex/__init__.py)
+          test "v$version" = "$TAG" || { echo "tag $TAG != package version $version"; exit 1; }
+      - name: build
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          twine check --strict dist/*
+      - uses: pypa/gh-action-pypi-publish@release/v1
